@@ -36,6 +36,7 @@ func (s *Server) Stats() *Stats {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
+	mux.HandleFunc("/metrics", s.metrics)
 	mux.Handle("/version", s.auth(http.HandlerFunc(s.versionHandler)))
 	mux.Handle("/api/v1/query", s.auth(http.HandlerFunc(s.query)))
 	return requestIDMiddleware(mux)
@@ -47,6 +48,15 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	_, _ = io.WriteString(w, s.stats.Snapshot().PrometheusText())
 }
 
 func (s *Server) versionHandler(w http.ResponseWriter, r *http.Request) {

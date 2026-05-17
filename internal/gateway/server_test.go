@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -37,6 +38,31 @@ func TestHealthzUnauthenticatedAndVersionProtected(t *testing.T) {
 	s.Handler().ServeHTTP(version, httptest.NewRequest(http.MethodGet, "/version", nil))
 	if version.Code != http.StatusUnauthorized {
 		t.Fatalf("version status = %d", version.Code)
+	}
+}
+
+func TestMetricsUnauthenticated(t *testing.T) {
+	s := newTestServer(fakeExecutor{fn: func(context.Context, TargetRequest) []OperationResult { return nil }})
+	s.stats.Record([]TargetResult{{Operations: []OperationResult{{Status: "ok"}, {Status: "error"}}}}, 150*time.Millisecond)
+	s.stats.RecordTrapReceived()
+	s.stats.RecordTrapForwardSuccess("10.0.0.0/8", 25*time.Millisecond)
+
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("metrics status = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{
+		`snmp_proxy_query_requests_total{outcome="partial_failure"} 1`,
+		`snmp_proxy_query_operations_total{outcome="success"} 1`,
+		`snmp_proxy_query_operations_total{outcome="failure"} 1`,
+		`snmp_proxy_traps_total{outcome="received"} 1`,
+		`snmp_proxy_trap_route_forwards_total{route="10.0.0.0/8",outcome="success"} 1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("metrics missing %q:\n%s", want, body)
+		}
 	}
 }
 

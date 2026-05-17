@@ -68,6 +68,7 @@ The initial release does not include:
 | Method | Path | Authentication | Purpose |
 | --- | --- | --- | --- |
 | `GET` | `/healthz` | No | Liveness/readiness probe |
+| `GET` | `/metrics` | No | Prometheus metrics |
 | `GET` | `/version` | Yes | Build and version metadata |
 | `POST` | `/api/v1/query` | Yes | Execute SNMP queries |
 
@@ -141,7 +142,16 @@ Requirements:
 - fields may use `"unknown"` when build metadata is unavailable;
 - must not expose configuration secrets.
 
-### 6.6 `POST /api/v1/query`
+### 6.6 `GET /metrics`
+
+Requirements:
+
+- unauthenticated;
+- returns Prometheus text exposition format;
+- exposes query request, operation, trap/inform, forwarding retry, forwarding latency, and per-route forwarding metrics;
+- must not expose SNMP communities, SNMP v3 passphrases, HTTP credentials, or webhook credentials.
+
+### 6.7 `POST /api/v1/query`
 
 #### Request schema
 
@@ -697,7 +707,6 @@ These are intentionally left for a later revision because the initial idea does 
 2. Whether response values need a richer canonical encoding for opaque bytes, object identifiers, counters, or IP address types.
 3. Whether global concurrency or rate limits are needed in addition to the current per-request limit.
 4. Whether readiness should eventually include configurable downstream dependency checks.
-5. Whether metrics should be exported through a dedicated endpoint in addition to logs.
-6. Whether later trap routing should support trap OID, community, varbind values, or hostname matching.
-7. Whether future releases should support multi-destination trap fan-out.
-8. Whether durable trap delivery or replay across restarts is needed.
+5. Whether later trap routing should support trap OID, community, varbind values, or hostname matching.
+6. Whether future releases should support multi-destination trap fan-out.
+7. Whether durable trap delivery or replay across restarts is needed.

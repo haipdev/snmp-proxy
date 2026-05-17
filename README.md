@@ -7,7 +7,7 @@ It supports:
 - `get`, `getnext`, `getbulk`, and `walk`
 - multiple targets per request
 - ordered operations per target
-- SNMP v2c trap receipt with CIDR-based webhook routing
+- SNMP v2c/v3 trap and inform receipt with CIDR-based webhook routing
 - HTTPS by default with generated local development certificates
 - structured per-operation errors for partial failures
 
@@ -36,6 +36,7 @@ docker run --rm \
 ## Endpoints
 
 - `GET /healthz` - unauthenticated health check
+- `GET /metrics` - unauthenticated Prometheus metrics
 - `GET /version` - authenticated build metadata
 - `POST /api/v1/query` - authenticated SNMP query execution
 
