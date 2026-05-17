@@ -48,6 +48,7 @@ func TestLoadConfigTrapSettings(t *testing.T) {
 		"SNMP_PROXY_TRAP_ENABLED":             "true",
 		"SNMP_PROXY_TRAP_LISTEN_ADDRESS":      ":19162",
 		"SNMP_PROXY_TRAP_ALLOWED_COMMUNITIES": "public,private",
+		"SNMP_PROXY_TRAP_V3_USERS_FILE":       "trap-users.json",
 		"SNMP_PROXY_TRAP_DEFAULT_TARGET_URL":  "https://example.test/traps",
 		"SNMP_PROXY_TRAP_FORWARD_RETRIES":     "2",
 	}
@@ -60,5 +61,8 @@ func TestLoadConfigTrapSettings(t *testing.T) {
 	}
 	if len(cfg.TrapAllowedCommunities) != 2 {
 		t.Fatalf("unexpected trap communities: %+v", cfg.TrapAllowedCommunities)
+	}
+	if cfg.TrapV3UsersFile != "trap-users.json" {
+		t.Fatalf("unexpected trap v3 users file: %q", cfg.TrapV3UsersFile)
 	}
 }

@@ -36,6 +36,7 @@ type Config struct {
 	TrapEnabled             bool
 	TrapListenAddress       string
 	TrapAllowedCommunities  []string
+	TrapV3UsersFile         string
 	TrapRoutesFile          string
 	TrapDefaultTargetURL    string
 	TrapForwardAuthHeader   string
@@ -114,6 +115,7 @@ func LoadConfig(args []string, getenv func(string) string) (Config, error) {
 	fs.BoolVar(&cfg.TrapEnabled, "trap-enabled", cfg.TrapEnabled, "enable SNMP trap forwarding")
 	fs.StringVar(&cfg.TrapListenAddress, "trap-listen-address", cfg.TrapListenAddress, "trap UDP listen address")
 	fs.StringVar(&trapCommunities, "trap-allowed-communities", trapCommunities, "comma-separated allowed trap communities")
+	fs.StringVar(&cfg.TrapV3UsersFile, "trap-v3-users-file", cfg.TrapV3UsersFile, "trap SNMP v3 users JSON file")
 	fs.StringVar(&cfg.TrapRoutesFile, "trap-routes-file", cfg.TrapRoutesFile, "trap routes JSON file")
 	fs.StringVar(&cfg.TrapDefaultTargetURL, "trap-default-target-url", cfg.TrapDefaultTargetURL, "default trap webhook URL")
 	fs.StringVar(&cfg.TrapForwardAuthHeader, "trap-forward-auth-header", cfg.TrapForwardAuthHeader, "trap webhook authorization header value")
@@ -180,6 +182,9 @@ func applyEnv(cfg *Config, getenv func(string) string) error {
 	}
 	if v := getenv("SNMP_PROXY_TRAP_ALLOWED_COMMUNITIES"); v != "" {
 		cfg.TrapAllowedCommunities = splitCSV(v)
+	}
+	if v := getenv("SNMP_PROXY_TRAP_V3_USERS_FILE"); v != "" {
+		cfg.TrapV3UsersFile = v
 	}
 	if v := getenv("SNMP_PROXY_TRAP_ROUTES_FILE"); v != "" {
 		cfg.TrapRoutesFile = v

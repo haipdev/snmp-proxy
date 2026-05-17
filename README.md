@@ -115,7 +115,7 @@ SNMP v3 requests use a `v3` credential block instead of `community`:
 
 ## Trap forwarding
 
-Enable trap forwarding with a route file:
+Enable trap and inform forwarding with a route file:
 
 ```json
 {
@@ -137,6 +137,25 @@ go run ./cmd/snmp-proxy
 ```
 
 Trap forwarding listens on UDP port `9162` by default. CIDR routing uses longest-prefix wins, and forwarded payloads never include the SNMP community string.
+
+SNMP v3 traps and informs use an allowlist file:
+
+```json
+{
+  "users": [
+    {
+      "username": "monitor",
+      "security_level": "authPriv",
+      "auth_protocol": "sha256",
+      "auth_passphrase": "auth-secret",
+      "priv_protocol": "aes",
+      "priv_passphrase": "priv-secret"
+    }
+  ]
+}
+```
+
+Set `SNMP_PROXY_TRAP_V3_USERS_FILE=trap-users.json` to accept those v3 senders.
 
 
 See [SPEC.md](SPEC.md) for the full behavior and configuration contract.

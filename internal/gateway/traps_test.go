@@ -56,6 +56,35 @@ func TestBuildTrapPayloadNormalizesFields(t *testing.T) {
 	}
 }
 
+func TestBuildTrapPayloadMarksV3Inform(t *testing.T) {
+	packet := &gosnmp.SnmpPacket{
+		Version: gosnmp.Version3,
+		PDUType: gosnmp.InformRequest,
+		Variables: []gosnmp.SnmpPDU{
+			{Name: "1.3.6.1.2.1.1.3.0", Type: gosnmp.TimeTicks, Value: uint32(123)},
+		},
+	}
+	payload, err := buildTrapPayload(packet, &net.UDPAddr{IP: net.ParseIP("10.1.2.3"), Port: 1234}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Version != "3" || !payload.IsInform {
+		t.Fatalf("unexpected payload: %+v", payload)
+	}
+}
+
+func TestNewTrapDecoderLoadsV3Users(t *testing.T) {
+	cfg := testConfig()
+	cfg.TrapV3UsersFile = writeRouteFile(t, `{"users":[{"username":"monitor","security_level":"authNoPriv","auth_protocol":"sha","auth_passphrase":"auth-secret"}]}`)
+	decoder, err := newTrapDecoder(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoder.TrapSecurityParametersTable == nil {
+		t.Fatal("expected v3 security table")
+	}
+}
+
 func TestTrapServiceForwardsWithRetry(t *testing.T) {
 	var attempts int32
 	var got TrapPayload
@@ -150,6 +179,116 @@ func TestTrapServiceReceivesTrap(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for forwarded trap")
+	}
+}
+
+func TestTrapServiceReceivesV3Trap(t *testing.T) {
+	received := make(chan TrapPayload, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload TrapPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapDefaultTargetURL = target.URL
+	cfg.TrapForwardWorkers = 1
+	cfg.TrapV3UsersFile = writeRouteFile(t, `{"users":[{"username":"monitor","security_level":"noAuthNoPriv"}]}`)
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, target.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	addr := service.conn.LocalAddr().(*net.UDPAddr)
+	sender := &gosnmp.GoSNMP{
+		Target:        addr.IP.String(),
+		Port:          uint16(addr.Port),
+		Version:       gosnmp.Version3,
+		SecurityModel: gosnmp.UserSecurityModel,
+		MsgFlags:      gosnmp.NoAuthNoPriv,
+		SecurityParameters: &gosnmp.UsmSecurityParameters{
+			UserName:                 "monitor",
+			AuthoritativeEngineBoots: 1,
+			AuthoritativeEngineTime:  1,
+			AuthoritativeEngineID:    string([]byte{0x80, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04}),
+		},
+		Timeout: time.Second,
+	}
+	if err := sender.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Conn.Close()
+	if _, err := sender.SendTrap(gosnmp.SnmpTrap{Variables: []gosnmp.SnmpPDU{{Name: "1.3.6.1.2.1.1.3.0", Type: gosnmp.TimeTicks, Value: uint32(1)}}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		if payload.Version != "3" {
+			t.Fatalf("unexpected forwarded payload: %+v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for forwarded v3 trap")
+	}
+}
+
+func TestTrapServiceReceivesInform(t *testing.T) {
+	received := make(chan TrapPayload, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload TrapPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapDefaultTargetURL = target.URL
+	cfg.TrapForwardWorkers = 1
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, target.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := service.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close()
+
+	addr := service.conn.LocalAddr().(*net.UDPAddr)
+	sender := &gosnmp.GoSNMP{Target: addr.IP.String(), Port: uint16(addr.Port), Community: "public", Version: gosnmp.Version2c, Timeout: time.Second}
+	if err := sender.Connect(); err != nil {
+		t.Fatal(err)
+	}
+	defer sender.Conn.Close()
+	if _, err := sender.SendTrap(gosnmp.SnmpTrap{IsInform: true, Variables: []gosnmp.SnmpPDU{{Name: "1.3.6.1.2.1.1.3.0", Type: gosnmp.TimeTicks, Value: uint32(1)}}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case payload := <-received:
+		if !payload.IsInform {
+			t.Fatalf("unexpected forwarded payload: %+v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for forwarded inform")
 	}
 }
 

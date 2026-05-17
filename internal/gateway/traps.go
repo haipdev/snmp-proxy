@@ -25,6 +25,10 @@ type TrapRouteFile struct {
 	Routes []TrapRouteConfig `json:"routes"`
 }
 
+type TrapV3UsersFile struct {
+	Users []V3Credentials `json:"users"`
+}
+
 type TrapRouteConfig struct {
 	SourceCIDR string `json:"source_cidr"`
 	TargetURL  string `json:"target_url"`
@@ -113,6 +117,7 @@ type TrapPayload struct {
 	SourceIP          string    `json:"source_ip"`
 	SourcePort        int       `json:"source_port"`
 	Version           string    `json:"version"`
+	IsInform          bool      `json:"is_inform,omitempty"`
 	MatchedSourceCIDR string    `json:"matched_source_cidr,omitempty"`
 	TrapOID           string    `json:"trap_oid,omitempty"`
 	Uptime            any       `json:"uptime,omitempty"`
@@ -150,13 +155,17 @@ func NewTrapService(cfg Config, logger *slog.Logger, stats *Stats, client *http.
 	if client == nil {
 		client = &http.Client{Timeout: cfg.TrapForwardTimeout}
 	}
+	decoder, err := newTrapDecoder(cfg)
+	if err != nil {
+		return nil, err
+	}
 	service := &TrapService{
 		cfg:      cfg,
 		logger:   logger,
 		stats:    stats,
 		router:   router,
 		client:   client,
-		decoder:  &gosnmp.GoSNMP{Logger: gosnmp.NewLogger(log.New(io.Discard, "", 0))},
+		decoder:  decoder,
 		queue:    make(chan trapJob, cfg.TrapForwardQueueSize),
 		readDone: make(chan struct{}),
 	}
@@ -164,6 +173,48 @@ func NewTrapService(cfg Config, logger *slog.Logger, stats *Stats, client *http.
 		close(service.readDone)
 	}
 	return service, nil
+}
+
+func newTrapDecoder(cfg Config) (*gosnmp.GoSNMP, error) {
+	logger := gosnmp.NewLogger(log.New(io.Discard, "", 0))
+	decoder := &gosnmp.GoSNMP{Logger: logger}
+	if cfg.TrapV3UsersFile == "" {
+		return decoder, nil
+	}
+	data, err := os.ReadFile(cfg.TrapV3UsersFile)
+	if err != nil {
+		return nil, fmt.Errorf("read trap v3 users file: %w", err)
+	}
+	var file TrapV3UsersFile
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&file); err != nil {
+		return nil, fmt.Errorf("decode trap v3 users file: %w", err)
+	}
+	if len(file.Users) == 0 {
+		return nil, fmt.Errorf("trap v3 users file must contain at least one user")
+	}
+	table := gosnmp.NewSnmpV3SecurityParametersTable(logger)
+	for i := range file.Users {
+		user := &file.Users[i]
+		if err := validateV3Credentials(user); err != nil {
+			return nil, fmt.Errorf("trap v3 users[%d]: %w", i, err)
+		}
+		params := &gosnmp.UsmSecurityParameters{
+			UserName:                 user.Username,
+			AuthenticationProtocol:   v3AuthProtocol(user.AuthProtocol),
+			AuthenticationPassphrase: user.AuthPassphrase,
+			PrivacyProtocol:          v3PrivProtocol(user.PrivProtocol),
+			PrivacyPassphrase:        user.PrivPassphrase,
+		}
+		if err := table.Add(user.Username, params); err != nil {
+			return nil, fmt.Errorf("trap v3 users[%d]: %w", i, err)
+		}
+	}
+	decoder.Version = gosnmp.Version3
+	decoder.SecurityModel = gosnmp.UserSecurityModel
+	decoder.TrapSecurityParametersTable = table
+	return decoder, nil
 }
 
 func (s *TrapService) Start(ctx context.Context) error {
@@ -226,12 +277,12 @@ func (s *TrapService) readLoop() {
 }
 
 func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) {
-	if packet.Version != gosnmp.Version2c || packet.PDUType != gosnmp.SNMPv2Trap {
+	if !supportedTrapPacket(packet) {
 		s.stats.RecordTrapRejected()
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "unsupported_version")
 		return
 	}
-	if !s.communityAllowed(packet.Community) {
+	if packet.Version == gosnmp.Version2c && !s.communityAllowed(packet.Community) {
 		s.stats.RecordTrapRejected()
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "community_rejected")
 		return
@@ -256,6 +307,32 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 		s.stats.RecordTrapForwardFailure(matchedCIDR)
 		s.logger.Info("trap dropped", "source_ip", addr.IP.String(), "matched_source_cidr", matchedCIDR, "outcome", "queue_full")
 	}
+	if packet.PDUType == gosnmp.InformRequest {
+		s.sendInformResponse(packet, addr)
+	}
+}
+
+func supportedTrapPacket(packet *gosnmp.SnmpPacket) bool {
+	versionSupported := packet.Version == gosnmp.Version2c || packet.Version == gosnmp.Version3
+	pduSupported := packet.PDUType == gosnmp.SNMPv2Trap || packet.PDUType == gosnmp.InformRequest
+	return versionSupported && pduSupported
+}
+
+func (s *TrapService) sendInformResponse(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) {
+	if s.conn == nil {
+		return
+	}
+	packet.PDUType = gosnmp.GetResponse
+	packet.Error = gosnmp.NoError
+	packet.ErrorIndex = 0
+	payload, err := packet.MarshalMsg()
+	if err != nil {
+		s.logger.Info("inform response failed", "source_ip", addr.IP.String(), "outcome", "encode_error")
+		return
+	}
+	if _, err := s.conn.WriteToUDP(payload, addr); err != nil {
+		s.logger.Info("inform response failed", "source_ip", addr.IP.String(), "outcome", "send_error")
+	}
 }
 
 func (s *TrapService) communityAllowed(community string) bool {
@@ -279,7 +356,8 @@ func buildTrapPayload(packet *gosnmp.SnmpPacket, addr *net.UDPAddr, matchedCIDR 
 		ReceivedAt:        time.Now().UTC(),
 		SourceIP:          addr.IP.String(),
 		SourcePort:        addr.Port,
-		Version:           "2c",
+		Version:           trapVersion(packet.Version),
+		IsInform:          packet.PDUType == gosnmp.InformRequest,
 		MatchedSourceCIDR: matchedCIDR,
 		Varbinds:          values,
 	}
@@ -294,6 +372,15 @@ func buildTrapPayload(packet *gosnmp.SnmpPacket, addr *net.UDPAddr, matchedCIDR 
 		}
 	}
 	return payload, nil
+}
+
+func trapVersion(version gosnmp.SnmpVersion) string {
+	switch version {
+	case gosnmp.Version3:
+		return "3"
+	default:
+		return "2c"
+	}
 }
 
 func (s *TrapService) worker() {

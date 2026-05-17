@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-`snmp-proxy` is a stateless network service that exposes a small authenticated HTTP(S) API for executing SNMP v2c and v3 read operations against one or more network targets and can receive SNMP v2c traps for forwarding to downstream HTTP(S) services.
+`snmp-proxy` is a stateless network service that exposes a small authenticated HTTP(S) API for executing SNMP v2c and v3 read operations against one or more network targets and can receive SNMP v2c/v3 traps and informs for forwarding to downstream HTTP(S) services.
 
 The service exists to:
 
@@ -19,7 +19,7 @@ The service exists to:
 2. Support SNMP v2c and v3 `get`, `getnext`, `getbulk`, and `walk`.
 3. Allow a single API request to contain multiple targets and multiple ordered operations per target.
 4. Return structured results for every accepted target request and operation whenever execution is possible.
-5. Receive SNMP v2c traps and forward them as normalized JSON over HTTP(S).
+5. Receive SNMP v2c/v3 traps and informs and forward them as normalized JSON over HTTP(S).
 6. Select trap forwarding destinations from source-IP CIDR routing rules.
 7. Avoid leaking SNMP communities, HTTP basic-auth credentials, webhook credentials, or TLS private-key material through logs or API responses.
 8. Be easy to run locally and predictable to deploy in containers.
@@ -30,7 +30,6 @@ The initial release does not include:
 
 - SNMP v1 support;
 - SNMP write operations such as `set`;
-- SNMP inform support;
 - target inventories, scheduling, persistence, historical storage, or dashboards;
 - durable trap queues, replay after restart, trap correlation, trap enrichment, or alerting;
 - multi-destination trap fan-out or routing rules beyond source-IP CIDR matching;
@@ -58,7 +57,7 @@ The initial release does not include:
 7. Operations for a single target execute in request order.
 8. Each operation produces its own success or error result.
 9. The response includes all target results in the same order as the input request array.
-10. If trap handling is enabled, the service listens for SNMP v2c traps on the configured UDP address.
+10. If trap handling is enabled, the service listens for SNMP v2c/v3 traps and informs on the configured UDP address.
 11. Each received trap is decoded, matched against source-IP CIDR routes, normalized to JSON, and forwarded to the selected HTTP(S) target.
 12. The service emits structured logs and periodic aggregate request and trap-forwarding statistics while excluding secrets.
 
@@ -323,9 +322,10 @@ At minimum:
 ### 7.1 Trap listener
 
 - Trap handling is disabled by default unless `SNMP_PROXY_TRAP_ENABLED=true`.
-- When enabled, the service listens for SNMP v2c traps on the configured UDP address.
-- Only SNMP v2c traps are supported in the initial release.
-- Trap communities may be restricted by an optional configured allowlist.
+- When enabled, the service listens for SNMP v2c/v3 traps and informs on the configured UDP address.
+- SNMP v2c communities may be restricted by an optional configured allowlist.
+- SNMP v3 trap/inform senders are accepted only when their USM credentials match an entry in `SNMP_PROXY_TRAP_V3_USERS_FILE`.
+- Accepted informs receive the required SNMP response after routing is attempted.
 - A malformed, unsupported, or disallowed trap is rejected before forwarding and is recorded with a sanitized outcome.
 
 ### 7.2 Trap routing
@@ -365,6 +365,7 @@ The proxy forwards normalized JSON payloads:
   "source_ip": "10.1.2.3",
   "source_port": 54321,
   "version": "2c",
+  "is_inform": false,
   "matched_source_cidr": "10.1.0.0/16",
   "trap_oid": ".1.3.6.1.6.3.1.1.5.3",
   "uptime": 12345,
@@ -581,6 +582,7 @@ Trap-forwarding stats should include at least:
 | `SNMP_PROXY_TRAP_ENABLED` | `false` | boolean |
 | `SNMP_PROXY_TRAP_LISTEN_ADDRESS` | `:9162` | valid UDP listen address |
 | `SNMP_PROXY_TRAP_ALLOWED_COMMUNITIES` | empty | optional comma-separated allowlist |
+| `SNMP_PROXY_TRAP_V3_USERS_FILE` | none | optional readable JSON file containing accepted SNMP v3 USM users |
 | `SNMP_PROXY_TRAP_ROUTES_FILE` | none | required readable JSON file when traps are enabled unless a default target URL is configured |
 | `SNMP_PROXY_TRAP_DEFAULT_TARGET_URL` | none | optional HTTP(S) URL used when no CIDR route matches |
 | `SNMP_PROXY_TRAP_FORWARD_AUTH_HEADER` | none | optional outbound webhook authorization header value |
@@ -663,7 +665,7 @@ The initial implementation is acceptable when:
 8. Requests and operation results respect configured resource limits.
 9. Invalid requests fail before SNMP work begins and produce deterministic client errors.
 10. Logs are structured, contain request IDs, and do not leak configured secrets.
-11. When trap handling is enabled, the service receives SNMP v2c traps on the configured UDP listener.
+11. When trap handling is enabled, the service receives SNMP v2c/v3 traps and informs on the configured UDP listener.
 12. Trap forwarding destinations are selected from source-IP CIDR routes using longest-prefix wins.
 13. Routed traps are forwarded as normalized JSON to the selected HTTP(S) target with configured retries and timeouts.
 14. Unmatched, malformed, rejected, dropped, and failed-forward traps are observable through sanitized logs and aggregate statistics.
@@ -691,7 +693,7 @@ The following points were implicit in the source idea and are made explicit here
 
 These are intentionally left for a later revision because the initial idea does not determine them and the first implementation can proceed without them:
 
-1. Whether future releases should support SNMP v3 trap receipt.
+1. Whether future releases should support additional trap routing keys beyond source CIDR.
 2. Whether response values need a richer canonical encoding for opaque bytes, object identifiers, counters, or IP address types.
 3. Whether global concurrency or rate limits are needed in addition to the current per-request limit.
 4. Whether readiness should eventually include configurable downstream dependency checks.
