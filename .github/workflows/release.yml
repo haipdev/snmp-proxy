@@ -1,23 +1,91 @@
 name: release
 
 on:
-  push:
-    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Semantic version bump to apply when no explicit version is provided
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: Optional explicit semantic version, for example 1.2.3 or v1.2.3
+        required: false
+        type: string
 
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       packages: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22.x"
-      - run: git tag --points-at HEAD | grep -Fx "${GITHUB_REF_NAME}"
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          explicit="${{ inputs.version }}"
+          if [[ -n "${explicit}" ]]; then
+            normalized="${explicit#v}"
+            if [[ ! "${normalized}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "version must be a semantic version like 1.2.3 or v1.2.3" >&2
+              exit 1
+            fi
+            next="v${normalized}"
+          else
+            latest="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1)"
+            latest="${latest:-v0.0.0}"
+            version="${latest#v}"
+            IFS='.' read -r major minor patch <<< "${version}"
+            case "${{ inputs.bump }}" in
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch)
+                patch=$((patch + 1))
+                ;;
+              *)
+                echo "unsupported bump: ${{ inputs.bump }}" >&2
+                exit 1
+                ;;
+            esac
+            next="v${major}.${minor}.${patch}"
+          fi
+
+          if git rev-parse "${next}" >/dev/null 2>&1; then
+            echo "tag ${next} already exists" >&2
+            exit 1
+          fi
+
+          echo "tag=${next}" >> "${GITHUB_OUTPUT}"
+          echo "version=${next#v}" >> "${GITHUB_OUTPUT}"
       - run: go test ./...
       - run: go build ./cmd/snmp-proxy
+      - name: Create and push tag
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -26,4 +94,4 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           push: true
-          tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+          tags: ghcr.io/${{ github.repository }}:${{ steps.version.outputs.tag }}

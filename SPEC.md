@@ -487,7 +487,7 @@ Cover at minimum:
 ### 12.3 CI/CD
 
 - GitHub Actions runs tests and builds on pull requests and mainline pushes.
-- Release workflow resolves semantic version, validates the tag target, runs tests, builds images, and publishes GHCR artifacts.
+- Release workflow runs manually, resolves a semantic version from a selected bump or explicit override, creates the release tag, runs tests, builds images, and publishes GHCR artifacts.
 
 ## 13. Acceptance Criteria
 
