@@ -76,4 +76,30 @@ curl -k -u user:pass https://localhost:8443/api/v1/query \
   }'
 ```
 
+Example response:
+
+```json
+{
+  "results": [
+    {
+      "target": "192.0.2.10",
+      "port": 161,
+      "operations": [
+        {
+          "type": "get",
+          "status": "ok",
+          "values": [
+            {
+              "oid": ".1.3.6.1.2.1.1.3.0",
+              "type": "TimeTicks",
+              "value": 12345
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
 See [SPEC.md](SPEC.md) for the full behavior and configuration contract.
