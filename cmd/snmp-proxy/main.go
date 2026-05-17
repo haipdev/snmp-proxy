@@ -26,7 +26,7 @@ func main() {
 		os.Exit(1)
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: parseLevel(cfg.LogLevel)}))
-	if cfg.WriteTimeout < cfg.DefaultSNMPTimeout*time.Duration(cfg.DefaultSNMPRetries+1) {
+	if cfg.WriteTimeout < expectedSNMPExecutionBudget(cfg) {
 		logger.Warn("HTTP write timeout may be shorter than SNMP execution budget")
 	}
 	if err := gateway.EnsureTLSMaterial(cfg); err != nil {
@@ -72,7 +72,14 @@ func main() {
 		logger.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)
 	}
-	traps.Close()
+	if err := traps.Close(shutdownCtx); err != nil {
+		logger.Error("graceful trap shutdown failed", "error", err)
+		os.Exit(1)
+	}
+}
+
+func expectedSNMPExecutionBudget(cfg gateway.Config) time.Duration {
+	return cfg.DefaultSNMPTimeout * time.Duration(cfg.DefaultSNMPRetries+1) * time.Duration(cfg.MaxOperationsPerTarget)
 }
 
 func parseLevel(level string) slog.Level {

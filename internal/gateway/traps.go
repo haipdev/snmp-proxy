@@ -241,7 +241,7 @@ func (s *TrapService) Start(ctx context.Context) error {
 		return err
 	}
 	s.conn = conn
-	s.workerCtx, s.cancel = context.WithCancel(ctx)
+	s.workerCtx, s.cancel = context.WithCancel(context.Background())
 	for range s.cfg.TrapForwardWorkers {
 		s.wg.Add(1)
 		go s.worker()
@@ -251,16 +251,30 @@ func (s *TrapService) Start(ctx context.Context) error {
 	return nil
 }
 
-func (s *TrapService) Close() {
+func (s *TrapService) Close(ctx context.Context) error {
 	if s.conn != nil {
 		_ = s.conn.Close()
 	}
 	<-s.readDone
-	if s.cancel != nil {
-		s.cancel()
-	}
 	close(s.queue)
-	s.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		if s.cancel != nil {
+			s.cancel()
+		}
+		return nil
+	case <-ctx.Done():
+		if s.cancel != nil {
+			s.cancel()
+		}
+		<-done
+		return ctx.Err()
+	}
 }
 
 func (s *TrapService) readLoop() {

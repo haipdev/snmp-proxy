@@ -223,7 +223,7 @@ func TestTrapServiceReceivesTrap(t *testing.T) {
 	if err := service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	addr := service.conn.LocalAddr().(*net.UDPAddr)
 	sender := &gosnmp.GoSNMP{Target: addr.IP.String(), Port: uint16(addr.Port), Community: "public", Version: gosnmp.Version2c, Timeout: time.Second}
@@ -271,7 +271,7 @@ func TestTrapServiceReceivesV1Trap(t *testing.T) {
 	if err := service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	addr := service.conn.LocalAddr().(*net.UDPAddr)
 	sender := &gosnmp.GoSNMP{Target: addr.IP.String(), Port: uint16(addr.Port), Community: "public", Version: gosnmp.Version1, Timeout: time.Second}
@@ -324,7 +324,7 @@ func TestTrapServiceReceivesV3Trap(t *testing.T) {
 	if err := service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	addr := service.conn.LocalAddr().(*net.UDPAddr)
 	sender := &gosnmp.GoSNMP{
@@ -385,7 +385,7 @@ func TestTrapServiceReceivesInform(t *testing.T) {
 	if err := service.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	defer service.Close()
+	defer service.Close(context.Background())
 
 	addr := service.conn.LocalAddr().(*net.UDPAddr)
 	sender := &gosnmp.GoSNMP{Target: addr.IP.String(), Port: uint16(addr.Port), Community: "public", Version: gosnmp.Version2c, Timeout: time.Second}
@@ -419,5 +419,190 @@ func TestTrapLogsDoNotLeakCommunity(t *testing.T) {
 	service.handlePacket(&gosnmp.SnmpPacket{Version: gosnmp.Version2c, PDUType: gosnmp.SNMPv2Trap, Community: "super-secret"}, &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
 	if bytes.Contains(logs.Bytes(), []byte("super-secret")) {
 		t.Fatalf("community leaked in logs: %s", logs.String())
+	}
+}
+
+func TestTrapServiceRoutesByCIDR(t *testing.T) {
+	received := make(chan TrapPayload, 1)
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload TrapPayload
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		received <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapRoutesFile = writeRouteFile(t, `{"routes":[{"source_cidr":"127.0.0.0/8","target_url":"`+target.URL+`"}]}`)
+	cfg.TrapForwardWorkers = 1
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, target.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+
+	service.handlePacket(&gosnmp.SnmpPacket{
+		Version:   gosnmp.Version2c,
+		PDUType:   gosnmp.SNMPv2Trap,
+		Community: "public",
+	}, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1234})
+
+	select {
+	case payload := <-received:
+		if payload.MatchedSourceCIDR != "127.0.0.0/8" {
+			t.Fatalf("unexpected routed payload: %+v", payload)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for CIDR-routed trap")
+	}
+}
+
+func TestTrapServiceRejectsMalformedPacket(t *testing.T) {
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapDefaultTargetURL = "https://example.test/traps"
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+
+	conn, err := net.DialUDP("udp", nil, service.conn.LocalAddr().(*net.UDPAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte("not-snmp")); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if service.stats.Snapshot().RejectedTraps == 1 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("malformed packet was not rejected")
+}
+
+func TestTrapServiceQueueFullIsRecorded(t *testing.T) {
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapDefaultTargetURL = "https://example.test/traps"
+	cfg.TrapForwardQueueSize = 1
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet := &gosnmp.SnmpPacket{Version: gosnmp.Version2c, PDUType: gosnmp.SNMPv2Trap, Community: "public"}
+	addr := &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1234}
+	service.handlePacket(packet, addr)
+	service.handlePacket(packet, addr)
+	if got := service.stats.Snapshot().FailedForwards; got != 1 {
+		t.Fatalf("expected one queue-full failure, got %d", got)
+	}
+}
+
+func TestTrapServiceCloseDrainsQueuedForwards(t *testing.T) {
+	var forwards int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&forwards, 1)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer target.Close()
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapDefaultTargetURL = target.URL
+	cfg.TrapForwardWorkers = 1
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, target.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.handlePacket(&gosnmp.SnmpPacket{Version: gosnmp.Version2c, PDUType: gosnmp.SNMPv2Trap, Community: "public"}, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1234})
+	if err := service.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if atomic.LoadInt32(&forwards) != 1 {
+		t.Fatalf("expected queued forward to drain, got %d", forwards)
+	}
+}
+
+func TestTrapServiceCloseHonorsDeadline(t *testing.T) {
+	started := make(chan struct{}, 1)
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapListenAddress = "127.0.0.1:0"
+	cfg.TrapDefaultTargetURL = "https://example.test/traps"
+	cfg.TrapForwardWorkers = 1
+	client := &http.Client{Transport: blockingRoundTripper{started: started}}
+	service, err := NewTrapService(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), &Stats{}, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	service.handlePacket(&gosnmp.SnmpPacket{Version: gosnmp.Version2c, PDUType: gosnmp.SNMPv2Trap, Community: "public"}, &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: 1234})
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forward did not start")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := service.Close(ctx); err == nil {
+		t.Fatal("expected close deadline error")
+	}
+}
+
+type blockingRoundTripper struct {
+	started chan<- struct{}
+}
+
+func (b blockingRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	b.started <- struct{}{}
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func TestTrapLogsDoNotLeakWebhookAuthHeader(t *testing.T) {
+	var logs bytes.Buffer
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer target.Close()
+
+	cfg := testConfig()
+	cfg.TrapEnabled = true
+	cfg.TrapDefaultTargetURL = target.URL
+	cfg.TrapForwardAuthHeader = "Bearer webhook-secret"
+	cfg.TrapForwardRetries = 0
+	service, err := NewTrapService(cfg, slog.New(slog.NewJSONHandler(&logs, nil)), &Stats{}, target.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.workerCtx, service.cancel = context.WithCancel(context.Background())
+	service.forward(trapJob{targetURL: target.URL, payload: TrapPayload{SourceIP: "127.0.0.1"}})
+	service.cancel()
+	if bytes.Contains(logs.Bytes(), []byte("webhook-secret")) {
+		t.Fatalf("webhook auth leaked in logs: %s", logs.String())
 	}
 }
