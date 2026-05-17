@@ -416,7 +416,7 @@ Periodic stats should include at least:
 
 | Variable | Default | Requirement |
 | --- | --- | --- |
-| `SNMP_PROXY_TLS_ENABLED` | `true` | boolean |
+| `SNMP_PROXY_TLS_ENABLED` | `true` | boolean; controls HTTP vs HTTPS independently of port |
 | `SNMP_PROXY_LISTEN_ADDRESS` | `:8443` with TLS, else `:8080` | valid listen address |
 | `SNMP_PROXY_TLS_CERT_PATH` | `certs/server.crt` | path |
 | `SNMP_PROXY_TLS_KEY_PATH` | `certs/server.key` | path |
