@@ -20,14 +20,7 @@ type GoSNMPExecutor struct {
 }
 
 func (e GoSNMPExecutor) Execute(ctx context.Context, req TargetRequest) []OperationResult {
-	client := &gosnmp.GoSNMP{
-		Target:    req.Target,
-		Port:      uint16(req.Port),
-		Community: req.Community,
-		Version:   gosnmp.Version2c,
-		Timeout:   time.Duration(req.TimeoutMS) * time.Millisecond,
-		Retries:   *req.Retries,
-	}
+	client := newGoSNMPClient(req)
 	if err := client.Connect(); err != nil {
 		apiErr := classifyError(err)
 		return errorResults(req.Operations, apiErr)
@@ -59,6 +52,83 @@ func (e GoSNMPExecutor) Execute(ctx context.Context, req TargetRequest) []Operat
 		out[i] = OperationResult{Type: op.Type, Status: "ok", Values: result}
 	}
 	return out
+}
+
+func newGoSNMPClient(req TargetRequest) *gosnmp.GoSNMP {
+	client := &gosnmp.GoSNMP{
+		Target:  req.Target,
+		Port:    uint16(req.Port),
+		Timeout: time.Duration(req.TimeoutMS) * time.Millisecond,
+		Retries: *req.Retries,
+	}
+	switch req.Version {
+	case "3":
+		client.Version = gosnmp.Version3
+		client.SecurityModel = gosnmp.UserSecurityModel
+		client.MsgFlags = v3MsgFlags(req.V3.SecurityLevel)
+		client.ContextName = req.V3.ContextName
+		client.ContextEngineID = req.V3.ContextEngineID
+		client.SecurityParameters = &gosnmp.UsmSecurityParameters{
+			UserName:                 req.V3.Username,
+			AuthenticationProtocol:   v3AuthProtocol(req.V3.AuthProtocol),
+			AuthenticationPassphrase: req.V3.AuthPassphrase,
+			PrivacyProtocol:          v3PrivProtocol(req.V3.PrivProtocol),
+			PrivacyPassphrase:        req.V3.PrivPassphrase,
+		}
+	default:
+		client.Community = req.Community
+		client.Version = gosnmp.Version2c
+	}
+	return client
+}
+
+func v3MsgFlags(level string) gosnmp.SnmpV3MsgFlags {
+	switch level {
+	case "authNoPriv":
+		return gosnmp.AuthNoPriv
+	case "authPriv":
+		return gosnmp.AuthPriv
+	default:
+		return gosnmp.NoAuthNoPriv
+	}
+}
+
+func v3AuthProtocol(protocol string) gosnmp.SnmpV3AuthProtocol {
+	switch protocol {
+	case "md5":
+		return gosnmp.MD5
+	case "sha":
+		return gosnmp.SHA
+	case "sha224":
+		return gosnmp.SHA224
+	case "sha256":
+		return gosnmp.SHA256
+	case "sha384":
+		return gosnmp.SHA384
+	case "sha512":
+		return gosnmp.SHA512
+	default:
+		return gosnmp.NoAuth
+	}
+}
+
+func v3PrivProtocol(protocol string) gosnmp.SnmpV3PrivProtocol {
+	switch protocol {
+	case "des":
+		return gosnmp.DES
+	case "aes":
+		return gosnmp.AES
+	case "aes192":
+		return gosnmp.AES192
+	case "aes256":
+		return gosnmp.AES256
+	case "aes192c":
+		return gosnmp.AES192C
+	case "aes256c":
+		return gosnmp.AES256C
+	default:
+		return gosnmp.NoPriv
+	}
 }
 
 func (e GoSNMPExecutor) executeOperation(client *gosnmp.GoSNMP, op Operation) ([]VarBind, error) {

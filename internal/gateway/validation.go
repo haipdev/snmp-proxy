@@ -29,11 +29,23 @@ func ValidateQuery(req *QueryRequest, cfg Config) error {
 		if tr.Version == "" {
 			tr.Version = "2c"
 		}
-		if tr.Version != "2c" {
-			return fmt.Errorf("requests[%d].version must be 2c", i)
-		}
-		if tr.Community == "" {
-			return fmt.Errorf("requests[%d].community must not be empty", i)
+		switch tr.Version {
+		case "2c":
+			if tr.Community == "" {
+				return fmt.Errorf("requests[%d].community must not be empty", i)
+			}
+			if tr.V3 != nil {
+				return fmt.Errorf("requests[%d].v3 is only valid for version 3", i)
+			}
+		case "3":
+			if tr.Community != "" {
+				return fmt.Errorf("requests[%d].community is only valid for version 2c", i)
+			}
+			if err := validateV3Credentials(tr.V3); err != nil {
+				return fmt.Errorf("requests[%d].v3: %w", i, err)
+			}
+		default:
+			return fmt.Errorf("requests[%d].version must be 2c or 3", i)
 		}
 		if tr.TimeoutMS < 0 {
 			return fmt.Errorf("requests[%d].timeout_ms must be greater than 0", i)
@@ -61,6 +73,65 @@ func ValidateQuery(req *QueryRequest, cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validateV3Credentials(v3 *V3Credentials) error {
+	if v3 == nil {
+		return fmt.Errorf("must be provided for version 3")
+	}
+	if strings.TrimSpace(v3.Username) == "" {
+		return fmt.Errorf("username must not be empty")
+	}
+	switch v3.SecurityLevel {
+	case "noAuthNoPriv":
+		if v3.AuthProtocol != "" || v3.AuthPassphrase != "" || v3.PrivProtocol != "" || v3.PrivPassphrase != "" {
+			return fmt.Errorf("authentication and privacy fields are not valid for noAuthNoPriv")
+		}
+	case "authNoPriv":
+		if !validAuthProtocol(v3.AuthProtocol) {
+			return fmt.Errorf("auth_protocol must be one of md5, sha, sha224, sha256, sha384, sha512")
+		}
+		if v3.AuthPassphrase == "" {
+			return fmt.Errorf("auth_passphrase must not be empty")
+		}
+		if v3.PrivProtocol != "" || v3.PrivPassphrase != "" {
+			return fmt.Errorf("privacy fields are only valid for authPriv")
+		}
+	case "authPriv":
+		if !validAuthProtocol(v3.AuthProtocol) {
+			return fmt.Errorf("auth_protocol must be one of md5, sha, sha224, sha256, sha384, sha512")
+		}
+		if v3.AuthPassphrase == "" {
+			return fmt.Errorf("auth_passphrase must not be empty")
+		}
+		if !validPrivProtocol(v3.PrivProtocol) {
+			return fmt.Errorf("priv_protocol must be one of des, aes, aes192, aes256, aes192c, aes256c")
+		}
+		if v3.PrivPassphrase == "" {
+			return fmt.Errorf("priv_passphrase must not be empty")
+		}
+	default:
+		return fmt.Errorf("security_level must be one of noAuthNoPriv, authNoPriv, authPriv")
+	}
+	return nil
+}
+
+func validAuthProtocol(v string) bool {
+	switch v {
+	case "md5", "sha", "sha224", "sha256", "sha384", "sha512":
+		return true
+	default:
+		return false
+	}
+}
+
+func validPrivProtocol(v string) bool {
+	switch v {
+	case "des", "aes", "aes192", "aes256", "aes192c", "aes256c":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateOperation(op *Operation, cfg Config) error {

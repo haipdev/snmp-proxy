@@ -2,7 +2,7 @@
 
 ## 1. Purpose
 
-`snmp-proxy` is a stateless network service that exposes a small authenticated HTTP(S) API for executing SNMP v2c read operations against one or more network targets and can receive SNMP v2c traps for forwarding to downstream HTTP(S) services.
+`snmp-proxy` is a stateless network service that exposes a small authenticated HTTP(S) API for executing SNMP v2c and v3 read operations against one or more network targets and can receive SNMP v2c traps for forwarding to downstream HTTP(S) services.
 
 The service exists to:
 
@@ -16,7 +16,7 @@ The service exists to:
 ## 2. Product Goals
 
 1. Accept JSON query requests over HTTPS by default.
-2. Support SNMP v2c `get`, `getnext`, `getbulk`, and `walk`.
+2. Support SNMP v2c and v3 `get`, `getnext`, `getbulk`, and `walk`.
 3. Allow a single API request to contain multiple targets and multiple ordered operations per target.
 4. Return structured results for every accepted target request and operation whenever execution is possible.
 5. Receive SNMP v2c traps and forward them as normalized JSON over HTTP(S).
@@ -28,7 +28,7 @@ The service exists to:
 
 The initial release does not include:
 
-- SNMP v1 or v3 support;
+- SNMP v1 support;
 - SNMP write operations such as `set`;
 - SNMP inform support;
 - target inventories, scheduling, persistence, historical storage, or dashboards;
@@ -173,8 +173,9 @@ Requirements:
 | --- | --- | --- | --- |
 | `target` | Yes | Non-empty hostname or IP literal | none |
 | `port` | No | Integer `1..65535` | `161` |
-| `version` | No | Must be `"2c"` if present | `"2c"` |
-| `community` | Yes | Non-empty string | none |
+| `version` | No | Must be `"2c"` or `"3"` if present | `"2c"` |
+| `community` | Conditional | Required for version `"2c"`; forbidden for version `"3"` | none |
+| `v3` | Conditional | Required for version `"3"`; forbidden for version `"2c"` | none |
 | `timeout_ms` | No | Integer greater than `0` | configured default timeout |
 | `retries` | No | Integer `>= 0` | configured default retries |
 | `operations` | Yes | Non-empty array | none |
@@ -185,6 +186,19 @@ The request is additionally bounded by configurable service limits:
 - maximum operations per target request;
 - maximum OIDs per non-walk operation;
 - maximum returned varbinds per operation.
+
+For version `"3"`, `v3` contains:
+
+| Field | Required | Rules |
+| --- | --- | --- |
+| `username` | Yes | Non-empty string |
+| `security_level` | Yes | One of `"noAuthNoPriv"`, `"authNoPriv"`, `"authPriv"` |
+| `auth_protocol` | Conditional | Required for authenticated levels; one of `"md5"`, `"sha"`, `"sha224"`, `"sha256"`, `"sha384"`, `"sha512"` |
+| `auth_passphrase` | Conditional | Required for authenticated levels |
+| `priv_protocol` | Conditional | Required for `"authPriv"`; one of `"des"`, `"aes"`, `"aes192"`, `"aes256"`, `"aes192c"`, `"aes256c"` |
+| `priv_passphrase` | Conditional | Required for `"authPriv"` |
+| `context_name` | No | Optional SNMP v3 scoped PDU context name |
+| `context_engine_id` | No | Optional SNMP v3 scoped PDU context engine ID |
 
 #### Operation schemas
 
@@ -677,7 +691,7 @@ The following points were implicit in the source idea and are made explicit here
 
 These are intentionally left for a later revision because the initial idea does not determine them and the first implementation can proceed without them:
 
-1. Whether future releases should support SNMP v3 authentication and privacy profiles.
+1. Whether future releases should support SNMP v3 trap receipt.
 2. Whether response values need a richer canonical encoding for opaque bytes, object identifiers, counters, or IP address types.
 3. Whether global concurrency or rate limits are needed in addition to the current per-request limit.
 4. Whether readiness should eventually include configurable downstream dependency checks.

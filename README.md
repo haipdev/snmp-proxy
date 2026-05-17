@@ -1,6 +1,6 @@
 # snmp-proxy
 
-`snmp-proxy` is a stateless Go service that exposes a small authenticated JSON API for SNMP v2c operations.
+`snmp-proxy` is a stateless Go service that exposes a small authenticated JSON API for SNMP v2c and v3 operations.
 
 It supports:
 
@@ -86,6 +86,33 @@ Example response:
 }
 ```
 
+SNMP v3 requests use a `v3` credential block instead of `community`:
+
+```json
+{
+  "requests": [
+    {
+      "target": "192.0.2.10",
+      "version": "3",
+      "v3": {
+        "username": "monitor",
+        "security_level": "authPriv",
+        "auth_protocol": "sha256",
+        "auth_passphrase": "auth-secret",
+        "priv_protocol": "aes",
+        "priv_passphrase": "priv-secret"
+      },
+      "operations": [
+        {
+          "type": "get",
+          "oids": [".1.3.6.1.2.1.1.3.0"]
+        }
+      ]
+    }
+  ]
+}
+```
+
 ## Trap forwarding
 
 Enable trap forwarding with a route file:
@@ -113,4 +140,3 @@ Trap forwarding listens on UDP port `9162` by default. CIDR routing uses longest
 
 
 See [SPEC.md](SPEC.md) for the full behavior and configuration contract.
-

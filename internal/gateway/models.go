@@ -5,13 +5,25 @@ type QueryRequest struct {
 }
 
 type TargetRequest struct {
-	Target     string      `json:"target"`
-	Port       int         `json:"port,omitempty"`
-	Version    string      `json:"version,omitempty"`
-	Community  string      `json:"community"`
-	TimeoutMS  int         `json:"timeout_ms,omitempty"`
-	Retries    *int        `json:"retries,omitempty"`
-	Operations []Operation `json:"operations"`
+	Target     string         `json:"target"`
+	Port       int            `json:"port,omitempty"`
+	Version    string         `json:"version,omitempty"`
+	Community  string         `json:"community,omitempty"`
+	V3         *V3Credentials `json:"v3,omitempty"`
+	TimeoutMS  int            `json:"timeout_ms,omitempty"`
+	Retries    *int           `json:"retries,omitempty"`
+	Operations []Operation    `json:"operations"`
+}
+
+type V3Credentials struct {
+	Username        string `json:"username"`
+	SecurityLevel   string `json:"security_level"`
+	AuthProtocol    string `json:"auth_protocol,omitempty"`
+	AuthPassphrase  string `json:"auth_passphrase,omitempty"`
+	PrivProtocol    string `json:"priv_protocol,omitempty"`
+	PrivPassphrase  string `json:"priv_passphrase,omitempty"`
+	ContextName     string `json:"context_name,omitempty"`
+	ContextEngineID string `json:"context_engine_id,omitempty"`
 }
 
 type Operation struct {

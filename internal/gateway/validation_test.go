@@ -37,3 +37,38 @@ func TestValidateQueryRejectsUnexpectedFields(t *testing.T) {
 		t.Fatal("expected validation error")
 	}
 }
+
+func TestValidateQueryAcceptsV3AuthPriv(t *testing.T) {
+	req := QueryRequest{Requests: []TargetRequest{{
+		Target:  "127.0.0.1",
+		Version: "3",
+		V3: &V3Credentials{
+			Username:       "monitor",
+			SecurityLevel:  "authPriv",
+			AuthProtocol:   "sha256",
+			AuthPassphrase: "auth-secret",
+			PrivProtocol:   "aes",
+			PrivPassphrase: "priv-secret",
+		},
+		Operations: []Operation{{Type: "get", OIDs: []string{".1.3.6"}}},
+	}}}
+	if err := ValidateQuery(&req, testConfig()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateQueryRejectsInvalidV3Combination(t *testing.T) {
+	req := QueryRequest{Requests: []TargetRequest{{
+		Target:  "127.0.0.1",
+		Version: "3",
+		V3: &V3Credentials{
+			Username:      "monitor",
+			SecurityLevel: "authNoPriv",
+			AuthProtocol:  "sha",
+		},
+		Operations: []Operation{{Type: "get", OIDs: []string{".1.3.6"}}},
+	}}}
+	if err := ValidateQuery(&req, testConfig()); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
