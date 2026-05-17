@@ -9,4 +9,5 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/snmp-proxy /usr/local/bin/snmp-proxy
 EXPOSE 8443
 EXPOSE 8080
+EXPOSE 9162/udp
 ENTRYPOINT ["/usr/local/bin/snmp-proxy"]

@@ -35,10 +35,19 @@ func main() {
 	}
 
 	app := gateway.NewServer(cfg, logger, gateway.GoSNMPExecutor{MaxVarbinds: cfg.MaxVarbindsPerOperation}, version, commit, buildTime)
+	traps, err := gateway.NewTrapService(cfg, logger, app.Stats(), nil)
+	if err != nil {
+		logger.Error("prepare trap service", "error", err)
+		os.Exit(1)
+	}
 	httpServer := app.HTTPServer()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	app.StartStatsLoop(ctx)
+	if err := traps.Start(ctx); err != nil {
+		logger.Error("start trap service", "error", err)
+		os.Exit(1)
+	}
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -63,6 +72,7 @@ func main() {
 		logger.Error("graceful shutdown failed", "error", err)
 		os.Exit(1)
 	}
+	traps.Close()
 }
 
 func parseLevel(level string) slog.Level {

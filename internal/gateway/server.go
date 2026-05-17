@@ -29,6 +29,10 @@ func NewServer(cfg Config, logger *slog.Logger, executor SNMPExecutor, version, 
 	return &Server{cfg: cfg, logger: logger, executor: executor, stats: &Stats{}, version: version, commit: commit, build: build}
 }
 
+func (s *Server) Stats() *Stats {
+	return s.stats
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", s.healthz)
