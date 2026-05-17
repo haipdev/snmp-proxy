@@ -31,11 +31,13 @@ type TrapV3UsersFile struct {
 
 type TrapRouteConfig struct {
 	SourceCIDR string `json:"source_cidr"`
+	TrapOID    string `json:"trap_oid,omitempty"`
 	TargetURL  string `json:"target_url"`
 }
 
 type trapRoute struct {
 	sourceCIDR string
+	trapOID    string
 	network    *net.IPNet
 	targetURL  string
 	prefixBits int
@@ -77,18 +79,27 @@ func LoadTrapRouter(path, defaultTarget string) (*TrapRouter, error) {
 		if err := validateHTTPURL(route.TargetURL); err != nil {
 			return nil, fmt.Errorf("invalid trap target URL for %q: %w", route.SourceCIDR, err)
 		}
+		if route.TrapOID != "" {
+			if !validOID(route.TrapOID) {
+				return nil, fmt.Errorf("invalid trap OID %q", route.TrapOID)
+			}
+			route.TrapOID = NormalizeOID(route.TrapOID)
+		}
 		ones, _ := network.Mask.Size()
-		router.routes = append(router.routes, trapRoute{sourceCIDR: route.SourceCIDR, network: network, targetURL: route.TargetURL, prefixBits: ones})
+		router.routes = append(router.routes, trapRoute{sourceCIDR: route.SourceCIDR, trapOID: route.TrapOID, network: network, targetURL: route.TargetURL, prefixBits: ones})
 	}
 	sort.SliceStable(router.routes, func(i, j int) bool {
+		if router.routes[i].prefixBits == router.routes[j].prefixBits {
+			return router.routes[i].trapOID != "" && router.routes[j].trapOID == ""
+		}
 		return router.routes[i].prefixBits > router.routes[j].prefixBits
 	})
 	return router, nil
 }
 
-func (r *TrapRouter) Match(ip net.IP) (string, string, bool) {
+func (r *TrapRouter) Match(ip net.IP, trapOID string) (string, string, bool) {
 	for _, route := range r.routes {
-		if route.network.Contains(ip) {
+		if route.network.Contains(ip) && (route.trapOID == "" || route.trapOID == trapOID) {
 			return route.targetURL, route.sourceCIDR, true
 		}
 	}
@@ -287,7 +298,8 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "community_rejected")
 		return
 	}
-	targetURL, matchedCIDR, ok := s.router.Match(addr.IP)
+	trapOID := extractTrapOID(packet.Variables)
+	targetURL, matchedCIDR, ok := s.router.Match(addr.IP, trapOID)
 	if !ok {
 		s.stats.RecordTrapUnmatched()
 		s.logger.Info("trap not routed", "source_ip", addr.IP.String(), "outcome", "route_not_found")
@@ -364,14 +376,28 @@ func buildTrapPayload(packet *gosnmp.SnmpPacket, addr *net.UDPAddr, matchedCIDR 
 	for _, value := range values {
 		switch value.OID {
 		case ".1.3.6.1.6.3.1.1.4.1.0":
-			if s, ok := value.Value.(string); ok {
-				payload.TrapOID = NormalizeOID(s)
-			}
+			payload.TrapOID = normalizeTrapOIDValue(value.Value)
 		case ".1.3.6.1.2.1.1.3.0":
 			payload.Uptime = value.Value
 		}
 	}
 	return payload, nil
+}
+
+func extractTrapOID(pdus []gosnmp.SnmpPDU) string {
+	for _, pdu := range pdus {
+		if NormalizeOID(pdu.Name) == ".1.3.6.1.6.3.1.1.4.1.0" {
+			return normalizeTrapOIDValue(pdu.Value)
+		}
+	}
+	return ""
+}
+
+func normalizeTrapOIDValue(value any) string {
+	if oid, ok := value.(string); ok && validOID(oid) {
+		return NormalizeOID(oid)
+	}
+	return ""
 }
 
 func trapVersion(version gosnmp.SnmpVersion) string {

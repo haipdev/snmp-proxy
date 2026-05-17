@@ -340,13 +340,14 @@ At minimum:
 
 ### 7.2 Trap routing
 
-- Each accepted trap is routed from the sender's source IP address.
-- Routes are configured as source-IP CIDR to target-URL mappings loaded at startup from `SNMP_PROXY_TRAP_ROUTES_FILE`.
+- Each accepted trap is routed from the sender's source IP address and optional trap OID.
+- Routes are configured as source-IP CIDR to target-URL mappings loaded at startup from `SNMP_PROXY_TRAP_ROUTES_FILE`; a route may optionally include `trap_oid`.
 - Matching uses longest-prefix wins so a more specific CIDR overrides a broader CIDR.
+- For routes with the same CIDR, an exact `trap_oid` match overrides a generic route without `trap_oid`.
 - Route definitions are evaluated only after startup validation succeeds.
 - If no route matches and no default target URL is configured, the trap is not forwarded and is recorded with outcome code `route_not_found`.
 - If `SNMP_PROXY_TRAP_DEFAULT_TARGET_URL` is configured, it is used only when no CIDR route matches.
-- Invalid CIDRs, non-HTTP(S) target URLs, unreadable route files, or malformed route definitions cause startup failure.
+- Invalid CIDRs, invalid trap OIDs, non-HTTP(S) target URLs, unreadable route files, or malformed route definitions cause startup failure.
 
 Example route file:
 
@@ -355,6 +356,7 @@ Example route file:
   "routes": [
     {
       "source_cidr": "10.0.0.0/8",
+      "trap_oid": ".1.3.6.1.6.3.1.1.5.3",
       "target_url": "https://ops-a.example.net/traps"
     },
     {

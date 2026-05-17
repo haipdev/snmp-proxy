@@ -123,6 +123,7 @@ Enable trap and inform forwarding with a route file:
   "routes": [
     {
       "source_cidr": "10.0.0.0/8",
+      "trap_oid": ".1.3.6.1.6.3.1.1.5.3",
       "target_url": "https://ops.example.net/traps"
     }
   ]
@@ -137,7 +138,7 @@ SNMP_PROXY_TRAP_ROUTES_FILE=routes.json \
 go run ./cmd/snmp-proxy
 ```
 
-Trap forwarding listens on UDP port `9162` by default. CIDR routing uses longest-prefix wins, and forwarded payloads never include the SNMP community string.
+Trap forwarding listens on UDP port `9162` by default. Routes may optionally include `trap_oid`; matching uses longest-prefix wins, and a trap-OID-specific route wins over a generic route with the same CIDR. Forwarded payloads never include the SNMP community string.
 
 SNMP v3 traps and informs use an allowlist file:
 

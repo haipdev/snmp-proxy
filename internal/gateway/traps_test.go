@@ -32,9 +32,30 @@ func TestTrapRouterUsesLongestPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	target, cidr, ok := router.Match(net.ParseIP("10.1.2.3"))
+	target, cidr, ok := router.Match(net.ParseIP("10.1.2.3"), "")
 	if !ok || target != "https://specific.example/traps" || cidr != "10.1.0.0/16" {
 		t.Fatalf("unexpected route match: %q %q %v", target, cidr, ok)
+	}
+}
+
+func TestTrapRouterMatchesTrapOIDBeforeGenericRoute(t *testing.T) {
+	router, err := LoadTrapRouter(writeRouteFile(t, `{"routes":[{"source_cidr":"10.1.0.0/16","target_url":"https://generic.example/traps"},{"source_cidr":"10.1.0.0/16","trap_oid":"1.3.6.1.6.3.1.1.5.3","target_url":"https://linkdown.example/traps"}]}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, _, ok := router.Match(net.ParseIP("10.1.2.3"), ".1.3.6.1.6.3.1.1.5.3")
+	if !ok || target != "https://linkdown.example/traps" {
+		t.Fatalf("unexpected trap OID route: %q %v", target, ok)
+	}
+	target, _, ok = router.Match(net.ParseIP("10.1.2.3"), ".1.3.6.1.6.3.1.1.5.4")
+	if !ok || target != "https://generic.example/traps" {
+		t.Fatalf("unexpected generic route: %q %v", target, ok)
+	}
+}
+
+func TestLoadTrapRouterRejectsInvalidTrapOID(t *testing.T) {
+	if _, err := LoadTrapRouter(writeRouteFile(t, `{"routes":[{"source_cidr":"10.1.0.0/16","trap_oid":"linkDown","target_url":"https://example.test/traps"}]}`), ""); err == nil {
+		t.Fatal("expected invalid trap OID error")
 	}
 }
 
