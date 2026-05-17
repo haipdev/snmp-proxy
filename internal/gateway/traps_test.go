@@ -98,12 +98,16 @@ func TestBuildTrapPayloadMarksV1Trap(t *testing.T) {
 	packet := &gosnmp.SnmpPacket{
 		Version: gosnmp.Version1,
 		PDUType: gosnmp.Trap,
+		SnmpTrap: gosnmp.SnmpTrap{
+			GenericTrap: 2,
+			Timestamp:   456,
+		},
 	}
 	payload, err := buildTrapPayload(packet, &net.UDPAddr{IP: net.ParseIP("10.1.2.3"), Port: 1234}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if payload.Version != "1" || payload.IsInform {
+	if payload.Version != "1" || payload.IsInform || payload.TrapOID != ".1.3.6.1.6.3.1.1.5.3" || payload.Uptime != uint(456) {
 		t.Fatalf("unexpected payload: %+v", payload)
 	}
 }
@@ -111,6 +115,23 @@ func TestBuildTrapPayloadMarksV1Trap(t *testing.T) {
 func TestSupportedTrapPacketAcceptsV1Trap(t *testing.T) {
 	if !supportedTrapPacket(&gosnmp.SnmpPacket{Version: gosnmp.Version1, PDUType: gosnmp.Trap}) {
 		t.Fatal("expected v1 trap to be supported")
+	}
+	if supportedTrapPacket(&gosnmp.SnmpPacket{Version: gosnmp.Version1, PDUType: gosnmp.InformRequest}) {
+		t.Fatal("expected v1 inform to be unsupported")
+	}
+}
+
+func TestExtractTrapOIDMapsV1EnterpriseSpecificTrap(t *testing.T) {
+	packet := &gosnmp.SnmpPacket{
+		Version: gosnmp.Version1,
+		SnmpTrap: gosnmp.SnmpTrap{
+			GenericTrap:  6,
+			SpecificTrap: 42,
+			Enterprise:   ".1.3.6.1.4.1.9",
+		},
+	}
+	if got := extractTrapOID(packet); got != ".1.3.6.1.4.1.9.0.42" {
+		t.Fatalf("trap OID = %q", got)
 	}
 }
 

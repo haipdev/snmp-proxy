@@ -298,7 +298,7 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "community_rejected")
 		return
 	}
-	trapOID := extractTrapOID(packet.Variables)
+	trapOID := extractTrapOID(packet)
 	targetURL, matchedCIDR, ok := s.router.Match(addr.IP, trapOID)
 	if !ok {
 		s.stats.RecordTrapUnmatched()
@@ -325,9 +325,14 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 }
 
 func supportedTrapPacket(packet *gosnmp.SnmpPacket) bool {
-	versionSupported := packet.Version == gosnmp.Version1 || packet.Version == gosnmp.Version2c || packet.Version == gosnmp.Version3
-	pduSupported := packet.PDUType == gosnmp.Trap || packet.PDUType == gosnmp.SNMPv2Trap || packet.PDUType == gosnmp.InformRequest
-	return versionSupported && pduSupported
+	switch packet.Version {
+	case gosnmp.Version1:
+		return packet.PDUType == gosnmp.Trap
+	case gosnmp.Version2c, gosnmp.Version3:
+		return packet.PDUType == gosnmp.SNMPv2Trap || packet.PDUType == gosnmp.InformRequest
+	default:
+		return false
+	}
 }
 
 func (s *TrapService) sendInformResponse(packet *gosnmp.SnmpPacket, addr *net.UDPAddr) {
@@ -373,6 +378,10 @@ func buildTrapPayload(packet *gosnmp.SnmpPacket, addr *net.UDPAddr, matchedCIDR 
 		MatchedSourceCIDR: matchedCIDR,
 		Varbinds:          values,
 	}
+	if packet.Version == gosnmp.Version1 {
+		payload.TrapOID = v1TrapOID(packet)
+		payload.Uptime = packet.Timestamp
+	}
 	for _, value := range values {
 		switch value.OID {
 		case ".1.3.6.1.6.3.1.1.4.1.0":
@@ -384,13 +393,30 @@ func buildTrapPayload(packet *gosnmp.SnmpPacket, addr *net.UDPAddr, matchedCIDR 
 	return payload, nil
 }
 
-func extractTrapOID(pdus []gosnmp.SnmpPDU) string {
-	for _, pdu := range pdus {
+func extractTrapOID(packet *gosnmp.SnmpPacket) string {
+	if packet.Version == gosnmp.Version1 {
+		return v1TrapOID(packet)
+	}
+	for _, pdu := range packet.Variables {
 		if NormalizeOID(pdu.Name) == ".1.3.6.1.6.3.1.1.4.1.0" {
 			return normalizeTrapOIDValue(pdu.Value)
 		}
 	}
 	return ""
+}
+
+func v1TrapOID(packet *gosnmp.SnmpPacket) string {
+	switch packet.GenericTrap {
+	case 0, 1, 2, 3, 4, 5:
+		return fmt.Sprintf(".1.3.6.1.6.3.1.1.5.%d", packet.GenericTrap+1)
+	case 6:
+		if !validOID(packet.Enterprise) {
+			return ""
+		}
+		return fmt.Sprintf("%s.0.%d", NormalizeOID(packet.Enterprise), packet.SpecificTrap)
+	default:
+		return ""
+	}
 }
 
 func normalizeTrapOIDValue(value any) string {
