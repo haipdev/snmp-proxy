@@ -1,13 +1,13 @@
 # snmp-proxy
 
-`snmp-proxy` is a stateless Go service that exposes a small authenticated JSON API for SNMP v2c and v3 operations.
+`snmp-proxy` is a stateless Go service that exposes a small authenticated JSON API for SNMP v1, v2c, and v3 operations.
 
 It supports:
 
-- `get`, `getnext`, `getbulk`, and `walk`
+- `get`, `getnext`, `getbulk`, and `walk` (`getbulk` is unavailable for SNMP v1)
 - multiple targets per request
 - ordered operations per target
-- SNMP v2c/v3 trap and inform receipt with CIDR-based webhook routing
+- SNMP v1/v2c trap and v2c/v3 inform receipt with CIDR-based webhook routing
 - HTTPS by default with generated local development certificates
 - structured per-operation errors for partial failures
 
@@ -87,7 +87,7 @@ Example response:
 }
 ```
 
-SNMP v3 requests use a `v3` credential block instead of `community`:
+SNMP v1 requests use `"version": "1"` with a community string. SNMP v3 requests use a `v3` credential block instead of `community`:
 
 ```json
 {

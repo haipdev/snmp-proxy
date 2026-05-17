@@ -62,6 +62,9 @@ func newGoSNMPClient(req TargetRequest) *gosnmp.GoSNMP {
 		Retries: *req.Retries,
 	}
 	switch req.Version {
+	case "1":
+		client.Community = req.Community
+		client.Version = gosnmp.Version1
 	case "3":
 		client.Version = gosnmp.Version3
 		client.SecurityModel = gosnmp.UserSecurityModel

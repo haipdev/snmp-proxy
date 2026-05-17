@@ -39,3 +39,19 @@ func TestNewGoSNMPClientBuildsV3Session(t *testing.T) {
 		t.Fatalf("context name = %q", client.ContextName)
 	}
 }
+
+func TestNewGoSNMPClientBuildsV1Session(t *testing.T) {
+	retries := 1
+	client := newGoSNMPClient(TargetRequest{
+		Target:    "127.0.0.1",
+		Port:      161,
+		Version:   "1",
+		Community: "public",
+		TimeoutMS: 3000,
+		Retries:   &retries,
+	})
+
+	if client.Version != gosnmp.Version1 || client.Community != "public" {
+		t.Fatalf("unexpected v1 client setup: %+v", client)
+	}
+}

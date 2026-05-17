@@ -57,6 +57,30 @@ func TestValidateQueryAcceptsV3AuthPriv(t *testing.T) {
 	}
 }
 
+func TestValidateQueryAcceptsV1(t *testing.T) {
+	req := QueryRequest{Requests: []TargetRequest{{
+		Target:     "127.0.0.1",
+		Version:    "1",
+		Community:  "public",
+		Operations: []Operation{{Type: "getnext", OIDs: []string{".1.3.6"}}},
+	}}}
+	if err := ValidateQuery(&req, testConfig()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateQueryRejectsV1GetBulk(t *testing.T) {
+	req := QueryRequest{Requests: []TargetRequest{{
+		Target:     "127.0.0.1",
+		Version:    "1",
+		Community:  "public",
+		Operations: []Operation{{Type: "getbulk", OIDs: []string{".1.3.6"}}},
+	}}}
+	if err := ValidateQuery(&req, testConfig()); err == nil {
+		t.Fatal("expected validation error")
+	}
+}
+
 func TestValidateQueryRejectsInvalidV3Combination(t *testing.T) {
 	req := QueryRequest{Requests: []TargetRequest{{
 		Target:  "127.0.0.1",

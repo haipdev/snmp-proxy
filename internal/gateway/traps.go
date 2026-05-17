@@ -293,7 +293,7 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "unsupported_version")
 		return
 	}
-	if packet.Version == gosnmp.Version2c && !s.communityAllowed(packet.Community) {
+	if packet.Version != gosnmp.Version3 && !s.communityAllowed(packet.Community) {
 		s.stats.RecordTrapRejected()
 		s.logger.Info("trap rejected", "source_ip", addr.IP.String(), "outcome", "community_rejected")
 		return
@@ -325,8 +325,8 @@ func (s *TrapService) handlePacket(packet *gosnmp.SnmpPacket, addr *net.UDPAddr)
 }
 
 func supportedTrapPacket(packet *gosnmp.SnmpPacket) bool {
-	versionSupported := packet.Version == gosnmp.Version2c || packet.Version == gosnmp.Version3
-	pduSupported := packet.PDUType == gosnmp.SNMPv2Trap || packet.PDUType == gosnmp.InformRequest
+	versionSupported := packet.Version == gosnmp.Version1 || packet.Version == gosnmp.Version2c || packet.Version == gosnmp.Version3
+	pduSupported := packet.PDUType == gosnmp.Trap || packet.PDUType == gosnmp.SNMPv2Trap || packet.PDUType == gosnmp.InformRequest
 	return versionSupported && pduSupported
 }
 
@@ -402,6 +402,8 @@ func normalizeTrapOIDValue(value any) string {
 
 func trapVersion(version gosnmp.SnmpVersion) string {
 	switch version {
+	case gosnmp.Version1:
+		return "1"
 	case gosnmp.Version3:
 		return "3"
 	default:

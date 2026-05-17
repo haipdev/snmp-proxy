@@ -11,6 +11,8 @@ All examples use SNMP v2c for brevity:
 }
 ```
 
+For SNMP v1, add `version: "1"` and keep the community string. SNMP v1 supports `get`, `getnext`, and `walk`, but not `getbulk`.
+
 For SNMP v3, replace `community` with `version: "3"` and a `v3` credential block:
 
 ```json

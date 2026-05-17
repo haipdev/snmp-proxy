@@ -30,7 +30,7 @@ func ValidateQuery(req *QueryRequest, cfg Config) error {
 			tr.Version = "2c"
 		}
 		switch tr.Version {
-		case "2c":
+		case "1", "2c":
 			if tr.Community == "" {
 				return fmt.Errorf("requests[%d].community must not be empty", i)
 			}
@@ -39,13 +39,13 @@ func ValidateQuery(req *QueryRequest, cfg Config) error {
 			}
 		case "3":
 			if tr.Community != "" {
-				return fmt.Errorf("requests[%d].community is only valid for version 2c", i)
+				return fmt.Errorf("requests[%d].community is only valid for versions 1 and 2c", i)
 			}
 			if err := validateV3Credentials(tr.V3); err != nil {
 				return fmt.Errorf("requests[%d].v3: %w", i, err)
 			}
 		default:
-			return fmt.Errorf("requests[%d].version must be 2c or 3", i)
+			return fmt.Errorf("requests[%d].version must be 1, 2c, or 3", i)
 		}
 		if tr.TimeoutMS < 0 {
 			return fmt.Errorf("requests[%d].timeout_ms must be greater than 0", i)
@@ -67,6 +67,9 @@ func ValidateQuery(req *QueryRequest, cfg Config) error {
 			return fmt.Errorf("requests[%d].operations exceeds maximum count", i)
 		}
 		for j := range tr.Operations {
+			if tr.Version == "1" && tr.Operations[j].Type == "getbulk" {
+				return fmt.Errorf("requests[%d].operations[%d]: getbulk is not supported for version 1", i, j)
+			}
 			if err := validateOperation(&tr.Operations[j], cfg); err != nil {
 				return fmt.Errorf("requests[%d].operations[%d]: %w", i, j, err)
 			}
