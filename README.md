@@ -20,23 +20,6 @@ go run ./cmd/snmp-proxy
 
 By default the service listens on `https://localhost:8443`.
 
-To run HTTP on the default non-TLS port:
-
-```bash
-SNMP_PROXY_BASIC_AUTH_USERNAME=user \
-SNMP_PROXY_BASIC_AUTH_PASSWORD=pass \
-SNMP_PROXY_TLS_ENABLED=false \
-go run ./cmd/snmp-proxy
-```
-
-To enable TLS on any custom port, use the TLS flag with the listen-address flag:
-
-```bash
-SNMP_PROXY_BASIC_AUTH_USERNAME=user \
-SNMP_PROXY_BASIC_AUTH_PASSWORD=pass \
-go run ./cmd/snmp-proxy -tls-enabled=true -listen-address=:9443
-```
-
 ## Docker
 
 ```bash
